@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🍅 Tomato Todos</title>
+<meta name="description" content="A local-first todo list fused with a pomodoro timer and per-task time tracking. All data stays in your browser.">
+<meta name="theme-color" content="#f5f3f0">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+<script>
+/* Apply the persisted theme before first paint to avoid a flash of the wrong theme. */
+(function () {
+  try {
+    var s = JSON.parse(localStorage.getItem('tomato-todos:settings') || '{}');
+    var pref = s && (s.theme === 'light' || s.theme === 'dark') ? s.theme : 'auto';
+    var dark = pref === 'dark' || (pref === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  } catch (e) { /* fall back to light */ }
+})();
+</script>
+</head>
+<body>
+
+<header class="app-header">
+  <h1>🍅 Tomato Todos</h1>
+  <div class="header-actions">
+    <button id="themeBtn" class="icon-btn header-btn" title="Theme (click to cycle)">🌗</button>
+    <button id="settingsBtn" class="icon-btn header-btn" title="Settings" aria-haspopup="dialog">⚙️</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <section class="card timer-card" id="timerCard" aria-label="Pomodoro timer">
+    <div class="mode-tabs" role="group" aria-label="Timer mode">
+      <button class="mode-tab" data-mode="focus">Focus <kbd>1</kbd></button>
+      <button class="mode-tab" data-mode="short">Short <kbd>2</kbd></button>
+      <button class="mode-tab" data-mode="long">Long <kbd>3</kbd></button>
+    </div>
+
+    <div class="ring-wrap">
+      <svg viewBox="0 0 240 240" aria-hidden="true">
+        <circle class="ring-bg" cx="120" cy="120" r="106"></circle>
+        <circle class="ring-fg" id="ringFg" cx="120" cy="120" r="106"></circle>
+      </svg>
+      <div class="timer-center">
+        <div class="time-display" id="timeDisplay">24:00</div>
+        <div class="cycle-dots" id="cycleDots" aria-hidden="true"></div>
+      </div>
+    </div>
+
+    <div class="timer-controls">
+      <button id="startBtn" class="btn primary big">Start</button>
+      <button id="resetBtn" class="btn">Reset</button>
+      <button id="skipBtn" class="btn">Skip</button>
+    </div>
+
+    <div class="active-task-line" id="activeTaskLine"></div>
+  </section>
+
+  <section class="card tasks-card" aria-label="Tasks">
+    <form id="taskForm" class="task-form" autocomplete="off">
+      <input id="taskInput" type="text" placeholder="Add a task…  (press N)" maxlength="300" aria-label="New task title">
+      <button type="submit" class="btn primary">Add</button>
+    </form>
+    <ul id="taskList" class="task-list"></ul>
+    <div id="doneSection" class="done-section" hidden>
+      <button id="doneToggle" class="done-toggle" aria-expanded="true"></button>
+      <ul id="doneList" class="task-list done-list"></ul>
+    </div>
+  </section>
+
+  <section class="card stats-card" aria-label="Today's stats">
+    <div class="stats-head">
+      <h2>Today</h2>
+      <span id="statsDate" class="muted"></span>
+    </div>
+    <div class="chips">
+      <div class="chip"><span class="chip-value" id="statMinutes">0m</span><span class="chip-label">focus</span></div>
+      <div class="chip"><span class="chip-value" id="statPom">0</span><span class="chip-label">🍅 today</span></div>
+      <div class="chip"><span class="chip-value" id="statStreak">0</span><span class="chip-label">streak</span></div>
+    </div>
+    <ul id="perTask" class="per-task"></ul>
+    <h2 class="chart-title">Last 14 days</h2>
+    <div id="chart" class="chart" role="img" aria-label="Focus minutes over the last 14 days"></div>
+  </section>
+
+</main>
+
+<footer class="app-footer">
+  <kbd>Space</kbd> start/pause · <kbd>N</kbd> new task · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> focus/short/long · <kbd>Esc</kbd> cancel
+  <span class="footer-note">— everything stays in your browser 🍅</span>
+</footer>
+
+<div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+<aside class="drawer" id="settingsDrawer" hidden role="dialog" aria-label="Settings">
+  <div class="drawer-head">
+    <h2>Settings</h2>
+    <button id="closeSettings" class="icon-btn" title="Close settings (Esc)">✕</button>
+  </div>
+
+  <h3>Timer</h3>
+  <div class="field-row">
+    <label>Focus <input type="number" id="setFocus" min="1" max="180" step="1"> min</label>
+    <label>Short break <input type="number" id="setShort" min="1" max="60" step="1"> min</label>
+  </div>
+  <div class="field-row">
+    <label>Long break <input type="number" id="setLong" min="1" max="120" step="1"> min</label>
+    <label>Long every <input type="number" id="setEvery" min="2" max="8" step="1"> 🍅</label>
+  </div>
+  <label class="check"><input type="checkbox" id="setAutoBreaks"> Auto-start breaks</label>
+  <label class="check"><input type="checkbox" id="setAutoFocus"> Auto-start next focus session</label>
+
+  <h3>Sound &amp; notifications</h3>
+  <div class="field-row volume-row">
+    <label>Volume <input type="range" id="setVolume" min="0" max="1" step="0.05" aria-label="Alarm volume"></label>
+    <button id="previewAlarm" class="btn small">🔊 Test</button>
+  </div>
+  <label class="check"><input type="checkbox" id="setNotify"> Desktop notifications</label>
+  <p class="hint" id="notifyHint"></p>
+
+  <h3>Theme</h3>
+  <div class="seg" id="themeSeg" role="group" aria-label="Theme">
+    <button class="seg-btn" data-theme-set="auto">Auto</button>
+    <button class="seg-btn" data-theme-set="light">Light</button>
+    <button class="seg-btn" data-theme-set="dark">Dark</button>
+  </div>
+
+  <h3>Data</h3>
+  <div class="btn-grid">
+    <button id="exportJson" class="btn">⬇ Export JSON</button>
+    <button id="importJson" class="btn">⬆ Import JSON</button>
+    <button id="copyLogseq" class="btn">📋 Copy Logseq log</button>
+    <button id="downloadLogseq" class="btn">⬇ Download Logseq log</button>
+    <button id="wipeToday" class="btn danger-outline">Wipe today's data</button>
+    <button id="wipeAll" class="btn danger">Wipe everything</button>
+  </div>
+  <input type="file" id="importFile" accept=".json,application/json" hidden>
+  <p class="hint">All data lives in this browser's localStorage — nothing is sent anywhere. Export a backup from time to time.</p>
+</aside>
+
+<div class="modal-backdrop" id="modalBackdrop" hidden></div>
+<div class="modal" id="modal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <h3 id="modalTitle"></h3>
+  <p id="modalBody"></p>
+  <div class="modal-actions">
+    <button class="btn" id="modalCancel">Cancel</button>
+    <button class="btn primary" id="modalConfirm">OK</button>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<noscript><p class="noscript">🍅 Tomato Todos needs JavaScript enabled.</p></noscript>
+
+<script src="app.js"></script>
+</body>
+</html>

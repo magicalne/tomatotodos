@@ -1,0 +1,18 @@
+{
+  "name": "Tomato Todos",
+  "short_name": "Tomato",
+  "description": "A local-first todo list fused with a pomodoro timer and per-task time tracking.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f3f0",
+  "theme_color": "#d93a35",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
