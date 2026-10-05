@@ -2,6 +2,8 @@
 
 A todo list fused with a pomodoro timer and per-task time tracking. Pure **HTML + CSS + vanilla JS** — no backend, no build step, no npm, no external dependencies. Everything is stored in your browser's `localStorage`; nothing ever leaves your device (see [PRIVACY.md](PRIVACY.md)).
 
+**Try it:** [magicalne.github.io/tomatotodos](https://magicalne.github.io/tomatotodos/) — every push to `main` redeploys automatically.
+
 ## Features
 
 - **Tasks** — add, inline-edit (double-click or ✏️), delete, complete/un-complete, reorder (↑/↓), optional note and due-today flag. Mark one task **active** (🎯) and every focus session's time is credited to it.
@@ -34,10 +36,12 @@ python3 -m http.server 8000
 
 ## Deploy to GitHub Pages
 
+This repo is already deployed via **Settings → Pages → Source: "Deploy from a branch" → `main` / `/ (root)`**, and `.nojekyll` is committed so files are served as-is. To re-do it on a fork:
+
 1. Push these files to a GitHub repository (branch `main`, repo root):
 
    ```sh
-   git init && git add -A && git commit -m "Tomato Todos"
+   git init -b main && git add -A && git commit -m "Tomato Todos"
    git remote add origin https://github.com/<you>/<repo>.git
    git push -u origin main
    ```
