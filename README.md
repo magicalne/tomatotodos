@@ -7,6 +7,7 @@ A todo list fused with a pomodoro timer and per-task time tracking. Pure **HTML 
 ## Features
 
 - **Tasks** — add, inline-edit (double-click or ✏️), delete, complete/un-complete, reorder (↑/↓), optional note and due-today flag. Mark one task **active** (🎯) and every focus session's time is credited to it.
+- **Recurring tasks** — click the 🔁 button next to *Add* to create a task that **repeats daily, weekly or monthly** (optionally "every N" days/weeks/months; weekly lets you pick weekdays, monthly a day of month). Each occurrence materializes as a normal task on its due day — at app load, or instantly at midnight if the app stays open — and missed days collapse into a single (⚠ overdue) instance instead of piling up. Completing or deleting an occurrence only affects that day; the series keeps its schedule. Click the 🔁 badge on an instance to edit the series or stop repeating. Renaming an instance renames the series.
 - **Pomodoro timer** — focus (default 24 min) / short break (5) / long break (15, after every 4 focus sessions — all configurable). Start / pause / resume / skip / reset. Auto-start breaks and auto-start next focus are toggleable.
   - The timer is **timestamp-based**: it stores `endsAt` and recomputes remaining time from the wall clock, so background-tab throttling and closed tabs never cause drift. Reload mid-session and the in-flight session is restored — including sessions that ended while the tab was closed (they get logged and credited with the correct end time).
   - **Alarm**: a Web Audio triple-tone (~2s) with a volume slider. The `AudioContext` is unlocked inside the Start-button click handler, so the alarm plays at session end without any further interaction. Optional desktop **notifications** (permission is requested from the settings toggle, never on page load) and a **flashing page title** as fallback. The live countdown is also shown in `document.title` (e.g. `18:24 ・ 🍅 focus`).
@@ -53,9 +54,9 @@ This repo is already deployed via **Settings → Pages → Source: "Deploy from 
 
 ## Data & storage
 
-`localStorage` keys: `tomato-todos:settings`, `tomato-todos:tasks`, `tomato-todos:sessions`, `tomato-todos:timer`, `tomato-todos:ui`.
+`localStorage` keys: `tomato-todos:settings`, `tomato-todos:tasks`, `tomato-todos:recurrences`, `tomato-todos:sessions`, `tomato-todos:timer`, `tomato-todos:ui`.
 
-- **Export JSON** writes a single `{app, version, exportedAt, settings, tasks, sessions, timer}` file; **Import JSON** restores it losslessly (with validation).
+- **Export JSON** writes a single `{app, version, exportedAt, settings, tasks, recurrences, sessions, timer}` file; **Import JSON** restores it losslessly (with validation).
 - **Logseq export** for today looks like:
 
   ```markdown
@@ -74,12 +75,13 @@ This repo is already deployed via **Settings → Pages → Source: "Deploy from 
 - **Skipped sessions**: skipping after ≥1s of elapsed time logs a `completed: false` record and credits the elapsed partial time. Skipping a not-yet-started session logs nothing. Skipping after start also auto-starts the next phase; automatic transitions follow the auto-start toggles.
 - **Focus minutes today** = full duration for completed sessions + elapsed time for skipped ones; only completed sessions count as 🍅.
 - **Streak** = consecutive days with ≥1 completed 🍅, counting back from today; if you haven't earned one yet today, it counts back from yesterday (grace).
+- **Recurring tasks**: templates live in `tomato-todos:recurrences`; a template materializes **at most one open instance** at a time, and the catch-up loop (on load / midnight rollover) collapses all missed due days into a single open instance rather than spamming duplicates. Completing/deleting an instance never touches the schedule — `nextDue` advances at spawn time, not at completion. A monthly rule on day 31 (etc.) falls back to the last day of shorter months. Instances are ordinary tasks otherwise: sessions, stats and the Logseq export treat them like any other task.
 - **"Wipe today"** removes today's sessions *and* un-completes tasks completed today; tasks themselves and earlier history stay.
 - **Reordering** uses ↑/↓ buttons rather than drag-and-drop — HTML5 drag is unreliable on touch devices.
 - **Long-break cadence**: the counter resets when a long break completes or is skipped, so a long break keeps being suggested until you actually take one.
 - The session log is capped at **5000 records** (oldest dropped) to keep `localStorage` happy.
 - Notifications need a secure context (GitHub Pages ✓, `localhost` ✓). iOS Safari doesn't support the `Notification` API — the beep and title flash still work there.
-- `window.__tomato` exposes `{state, tick, completeSession, buildExport, buildLogseqMarkdown}` on the console as a small debug/testing hook.
+- `window.__tomato` exposes `{state, tick, completeSession, buildExport, buildLogseqMarkdown, reconcileRecurrences, nextOccurrence, ruleMatchesDay}` on the console as a small debug/testing hook.
 
 ## Files
 

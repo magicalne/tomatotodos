@@ -40,6 +40,9 @@
 
 * { box-sizing: border-box; }
 
+/* The hidden attribute must always win, even over display rules like .recur-builder. */
+[hidden] { display: none !important; }
+
 html, body { margin: 0; padding: 0; }
 
 body {
@@ -346,6 +349,20 @@ input[type="text"]:focus, input[type="number"]:focus {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+select {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+}
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .task-list { list-style: none; margin: 0; padding: 0; }
 
 .task {
@@ -412,6 +429,13 @@ input[type="text"]:focus, input[type="number"]:focus {
   flex: none;
 }
 .badge.due-badge { background: var(--accent-soft); color: var(--accent); }
+.badge.recur-badge {
+  background: var(--break-soft);
+  color: var(--break);
+  cursor: pointer;
+  transition: filter 0.12s ease;
+}
+.badge.recur-badge:hover { filter: brightness(0.94); }
 
 .task-stats {
   flex: none;
@@ -453,6 +477,59 @@ input[type="text"]:focus, input[type="number"]:focus {
   color: var(--muted);
 }
 .edit-actions { display: flex; gap: 8px; }
+
+/* Repeat (recurring tasks) */
+.recur-toggle {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 15px;
+  color: var(--muted);
+}
+.recur-toggle:hover { background: var(--surface-2); color: var(--text); }
+.recur-toggle.on { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+
+.recur-builder {
+  margin: -4px 0 12px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.recur-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  flex-wrap: wrap;
+}
+.recur-every {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.recur-line input[type="number"] { width: 54px; padding: 5px 6px; text-align: center; }
+.recur-unit { color: var(--muted); }
+
+.wd-row { display: flex; gap: 5px; flex-wrap: wrap; }
+.wd-chip {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--muted);
+  transition: all 0.12s ease;
+}
+.wd-chip:hover { border-color: var(--accent); color: var(--accent); }
+.wd-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 /* Done section */
 .done-section { margin-top: 14px; }
@@ -707,6 +784,9 @@ input[type="text"]:focus, input[type="number"]:focus {
 }
 .modal h3 { margin: 0 0 8px; font-size: 17px; }
 .modal p { margin: 0 0 16px; color: var(--muted); font-size: 14px; overflow-wrap: break-word; }
+.modal .modal-task-name { font-weight: 650; color: var(--text); margin-bottom: 14px; }
+.modal .recur-line { margin-bottom: 10px; }
+.modal #recurRemoveRepeat { margin-right: auto; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .modal .btn.danger { background: #c0342f; border-color: #c0342f; color: #fff; }
 

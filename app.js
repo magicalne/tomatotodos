@@ -15,16 +15,19 @@
   /* ============================== Constants ============================== */
 
   const APP = 'tomato-todos';
-  const APP_VERSION = '1.0.0';
+  const APP_VERSION = '1.1.0';
   const KEYS = {
     settings: APP + ':settings',
     tasks: APP + ':tasks',
+    recurrences: APP + ':recurrences',
     sessions: APP + ':sessions',
     timer: APP + ':timer',
     ui: APP + ':ui',
   };
   const MODES = ['focus', 'short', 'long'];
   const MODE_LABEL = { focus: 'focus', short: 'short break', long: 'long break' };
+  const RECURRENCE_FREQS = ['daily', 'weekly', 'monthly'];
+  const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const DEFAULT_SETTINGS = {
     focusMin: 24,
     shortBreakMin: 5,
@@ -67,6 +70,24 @@
     return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
   }
   const todayKey = () => dayKey(Date.now());
+
+  const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+  const isDayKey = (v) => typeof v === 'string' && DAY_KEY_RE.test(v);
+
+  /** Day key -> local Date at midnight. Date arithmetic survives DST; ms math does not. */
+  function dayToDate(key) {
+    const p = key.split('-');
+    return new Date(+p[0], +p[1] - 1, +p[2]);
+  }
+
+  /** Whole calendar days between two day keys (DST-safe via rounding). */
+  function diffDays(aKey, bKey) {
+    return Math.round((dayToDate(bKey) - dayToDate(aKey)) / 86400000);
+  }
+
+  function daysInMonthOf(date) {
+    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  }
 
   /** mm:ss, rounding up so a full 24:00 session shows 24:00, not 23:59. */
   function fmtClock(ms) {
@@ -146,6 +167,45 @@
         done: toBool(t.done, false),
         createdAt: toNum(t.createdAt, Date.now()),
         completedAt: toNum(t.completedAt, null),
+        // Fields of materialized recurring-task instances (absent on plain tasks).
+        recurrenceId: toStr(t.recurrenceId) || null,
+        scheduledFor: isDayKey(t.scheduledFor) ? t.scheduledFor : null,
+      });
+    }
+    return out;
+  }
+
+  function sanitizeRecurrences(raw) {
+    if (!Array.isArray(raw)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const r of raw) {
+      if (!r || typeof r !== 'object') continue;
+      const title = toStr(r.title).replace(/\s+/g, ' ').trim().slice(0, 300);
+      if (!title) continue;
+      let id = toStr(r.id);
+      if (!id || seen.has(id)) id = uuid();
+      seen.add(id);
+      const createdAt = toNum(r.createdAt, Date.now());
+      const rawRecur = r.recur && typeof r.recur === 'object' ? r.recur : {};
+      const freq = RECURRENCE_FREQS.includes(rawRecur.freq) ? rawRecur.freq : 'daily';
+      let weekdays = Array.isArray(rawRecur.weekdays)
+        ? Array.from(new Set(rawRecur.weekdays.filter((n) => Number.isInteger(n) && n >= 0 && n <= 6))).sort((a, b) => a - b)
+        : [];
+      if (freq === 'weekly' && weekdays.length === 0) weekdays = [new Date(createdAt).getDay()];
+      out.push({
+        id,
+        title,
+        note: toStr(r.note).slice(0, 1000),
+        recur: {
+          freq,
+          interval: clamp(Math.round(toNum(rawRecur.interval, 1)), 1, 12),
+          weekdays,
+          monthDay: clamp(Math.round(toNum(rawRecur.monthDay, 1)), 1, 31),
+        },
+        startKey: isDayKey(r.startKey) ? r.startKey : dayKey(createdAt),
+        nextDue: isDayKey(r.nextDue) ? r.nextDue : null,
+        createdAt,
       });
     }
     return out;
@@ -201,6 +261,7 @@
   const state = {
     settings: sanitizeSettings(readJSON(KEYS.settings) ?? {}),
     tasks: sanitizeTasks(readJSON(KEYS.tasks) ?? []),
+    recurrences: sanitizeRecurrences(readJSON(KEYS.recurrences) ?? []),
     sessions: sanitizeSessions(readJSON(KEYS.sessions) ?? []),
     timer: sanitizeTimer(readJSON(KEYS.timer) ?? {}),
   };
@@ -239,6 +300,7 @@
   function saveState() {
     writeJSON(KEYS.settings, state.settings);
     writeJSON(KEYS.tasks, state.tasks);
+    writeJSON(KEYS.recurrences, state.recurrences);
     writeJSON(KEYS.sessions, state.sessions);
     writeJSON(KEYS.timer, state.timer);
     scheduleCompletionFallback();
@@ -395,8 +457,20 @@
     if (!titleFlashing) document.title = titleFor(rem);
   }
 
+  let lastDaySeen = todayKey();
+
   /** Repaint from the wall clock. The interval must never accumulate time. */
   function tick() {
+    // Day rollover while the app stays open: materialize recurring tasks.
+    const today = todayKey();
+    if (today !== lastDaySeen) {
+      lastDaySeen = today;
+      const n = reconcileRecurrences();
+      if (n > 0) {
+        toast('🔁 ' + n + ' recurring task' + (n === 1 ? '' : 's') + ' due');
+        renderTasks();
+      }
+    }
     const t = state.timer;
     if (t.running) {
       const rem = (t.endsAt ?? 0) - Date.now();
@@ -675,6 +749,14 @@
     }
     if (patch.note != null) task.note = String(patch.note).slice(0, 1000);
     if (patch.dueToday != null) task.dueToday = !!patch.dueToday;
+    // Renaming an instance renames the series; past instances keep their titles.
+    if (task.recurrenceId) {
+      const r = recurrenceById(task.recurrenceId);
+      if (r) {
+        if (patch.title != null) r.title = task.title;
+        if (patch.note != null) r.note = task.note;
+      }
+    }
     saveState();
     renderTasks();
     renderTimer();
@@ -694,6 +776,123 @@
     state.tasks[b] = tmp;
     saveState();
     renderTasks();
+  }
+
+  /* ============================== Recurring tasks ==============================
+   * A recurrence is a template with a rule; a concrete task ("instance") is
+   * materialized into the list when its due day arrives. Completing or
+   * deleting an instance only affects that occurrence — the template spawns
+   * the next one on schedule. At most one open instance exists per template,
+   * and missed days collapse into a single instance so the list never piles up.
+   * ============================================================================ */
+
+  function recurrenceById(id) {
+    return state.recurrences.find((r) => r.id === id) || null;
+  }
+
+  /** Does `date` (a local Date) hit the rule anchored at the template's startKey? */
+  function ruleMatchesDay(date, rule, startKey) {
+    if (rule.freq === 'daily') {
+      const dd = diffDays(startKey, dayKey(+date));
+      return dd >= 0 && dd % rule.interval === 0;
+    }
+    if (rule.freq === 'weekly') {
+      if (!rule.weekdays.includes(date.getDay())) return false;
+      const anchor = dayToDate(startKey);
+      anchor.setHours(12);
+      anchor.setDate(anchor.getDate() - anchor.getDay()); // start of anchor week
+      const week = new Date(date);
+      week.setHours(12);
+      week.setDate(week.getDate() - week.getDay()); // start of this week
+      const ww = Math.round((week - anchor) / (7 * 86400000));
+      return ww >= 0 && ww % rule.interval === 0;
+    }
+    // monthly — day 31 in a 28-day month means its last day
+    if (date.getDate() !== Math.min(rule.monthDay, daysInMonthOf(date))) return false;
+    const anchor = dayToDate(startKey);
+    const months = (date.getFullYear() - anchor.getFullYear()) * 12 + (date.getMonth() - anchor.getMonth());
+    return months >= 0 && months % rule.interval === 0;
+  }
+
+  /**
+   * First matching day on/after `fromKey` (strictly after unless `inclusive`).
+   * Scans day by day, capped well beyond any real cadence.
+   */
+  function nextOccurrence(fromKey, rule, startKey, inclusive = false) {
+    const d = dayToDate(fromKey);
+    if (!inclusive) d.setDate(d.getDate() + 1);
+    for (let i = 0; i < 800; i++) {
+      if (ruleMatchesDay(d, rule, startKey)) return dayKey(+d);
+      d.setDate(d.getDate() + 1);
+    }
+    return null;
+  }
+
+  /**
+   * Sync templates with the task list and materialize whatever is due.
+   * Returns the number of instances spawned.
+   */
+  function reconcileRecurrences() {
+    const today = todayKey();
+    let dirty = false;
+    let spawned = 0;
+    for (const r of state.recurrences) {
+      // An open instance already represents this series — nothing to spawn.
+      if (state.tasks.some((t) => t.recurrenceId === r.id && !t.done)) continue;
+      if (!r.nextDue) {
+        r.nextDue = nextOccurrence(r.startKey, r.recur, r.startKey, true);
+        dirty = true;
+      }
+      let latest = null; // newest due day that is still waiting
+      while (r.nextDue && r.nextDue <= today) {
+        latest = r.nextDue;
+        r.nextDue = nextOccurrence(r.nextDue, r.recur, r.startKey, false);
+        dirty = true;
+      }
+      if (latest) {
+        state.tasks.unshift({
+          id: uuid(),
+          title: r.title,
+          note: r.note,
+          dueToday: true,
+          done: false,
+          createdAt: Date.now(),
+          completedAt: null,
+          recurrenceId: r.id,
+          scheduledFor: latest,
+        });
+        spawned += 1;
+        dirty = true;
+      }
+    }
+    // Instances whose template vanished become plain tasks.
+    for (const t of state.tasks) {
+      if (t.recurrenceId && !recurrenceById(t.recurrenceId)) {
+        t.recurrenceId = null;
+        dirty = true;
+      }
+    }
+    if (dirty) saveState();
+    return spawned;
+  }
+
+  function recurShortLabel(rule) {
+    const n = rule.interval;
+    if (rule.freq === 'daily') return n === 1 ? 'daily' : 'every ' + n + ' days';
+    if (rule.freq === 'weekly') return n === 1 ? 'weekly' : 'every ' + n + ' weeks';
+    return n === 1 ? 'monthly' : 'every ' + n + ' months';
+  }
+
+  function recurDescribe(rule) {
+    if (rule.freq === 'daily') return rule.interval === 1 ? 'Every day' : 'Every ' + rule.interval + ' days';
+    if (rule.freq === 'weekly') {
+      let s = rule.interval === 1 ? 'Every week' : 'Every ' + rule.interval + ' weeks';
+      if (rule.weekdays.length && rule.weekdays.length < 7) {
+        s += ' on ' + rule.weekdays.map((w) => WEEKDAY_NAMES[w]).join(', ');
+      }
+      return s;
+    }
+    return (rule.interval === 1 ? 'Monthly' : 'Every ' + rule.interval + ' months') + ' on day ' + rule.monthDay;
   }
 
   /* ============================== Stats ============================== */
@@ -780,10 +979,11 @@
   function buildExport() {
     return {
       app: APP,
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       settings: state.settings,
       tasks: state.tasks,
+      recurrences: state.recurrences,
       sessions: state.sessions,
       timer: state.timer,
     };
@@ -833,21 +1033,25 @@
         const next = {
           settings: sanitizeSettings(obj.settings),
           tasks: sanitizeTasks(obj.tasks),
+          recurrences: sanitizeRecurrences(obj.recurrences),
           sessions: sanitizeSessions(obj.sessions),
           timer: sanitizeTimer(obj.timer),
         };
         confirmDialog({
           title: 'Import backup?',
           body: 'Replaces current data with ' + next.tasks.length + ' task(s) and ' + next.sessions.length +
-            ' session(s)' + (obj.exportedAt ? ' exported ' + obj.exportedAt.slice(0, 10) : '') + '.',
+            ' session(s)' + (next.recurrences.length ? ' plus ' + next.recurrences.length + ' repeating' : '') +
+            (obj.exportedAt ? ' exported ' + obj.exportedAt.slice(0, 10) : '') + '.',
           confirmLabel: 'Import',
         }).then((ok) => {
           if (!ok) return;
           state.settings = next.settings;
           state.tasks = next.tasks;
+          state.recurrences = next.recurrences;
           state.sessions = next.sessions;
           state.timer = next.timer;
           normalizeTimer();
+          reconcileRecurrences();
           applyTheme();
           saveState();
           renderAll();
@@ -944,6 +1148,7 @@
       } catch (e) { /* best effort */ }
       state.settings = deepCopy(DEFAULT_SETTINGS);
       state.tasks = [];
+      state.recurrences = [];
       state.sessions = [];
       state.timer = {
         mode: 'focus',
@@ -1007,6 +1212,22 @@
     }
   }
 
+  /** ⚑ today badge; recurring instances that missed their day show as overdue instead. */
+  function dueBadgeHTML(task) {
+    if (!task.dueToday) return '';
+    if (task.recurrenceId && task.scheduledFor && task.scheduledFor < todayKey()) {
+      return '<span class="badge due-badge" title="Scheduled ' + task.scheduledFor + '">⚠ overdue</span>';
+    }
+    return '<span class="badge due-badge" title="Due today">⚑ today</span>';
+  }
+
+  function recurBadgeHTML(task) {
+    const r = recurrenceById(task.recurrenceId);
+    if (!r) return '';
+    return '<button type="button" class="badge recur-badge" data-action="edit-recur" aria-haspopup="dialog" title="' +
+      esc(recurDescribe(r.recur)) + ' — click to edit the series">🔁 ' + esc(recurShortLabel(r.recur)) + '</button>';
+  }
+
   function taskRowHTML(task, index, count) {
     if (editingTaskId === task.id) return taskEditHTML(task);
     const st = taskTodayStats(task.id);
@@ -1021,7 +1242,8 @@
         '<div class="task-main">' +
           '<div class="task-title-line">' +
             '<span class="task-title">' + esc(task.title) + '</span>' +
-            (task.dueToday ? '<span class="badge due-badge" title="Due today">⚑ today</span>' : '') +
+            dueBadgeHTML(task) +
+            recurBadgeHTML(task) +
             (task.note ? '<span class="badge" title="' + esc(task.note) + '">📝</span>' : '') +
           '</div>' +
           (task.note ? '<div class="task-note">' + esc(task.note) + '</div>' : '') +
@@ -1194,6 +1416,181 @@
     toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
   }
 
+  /* ============================== Recurring task UI ============================== */
+
+  const BUILDER = {
+    freqSel: '#recurFreq', everyInp: '#recurEvery', wdBox: '#recurWeeklyPick',
+    mdInp: '#recurMonthDay', mdBox: '#recurMonthlyPick', unit: '#recurEveryUnit',
+  };
+  const EDITOR = {
+    freqSel: '#recurEditFreq', everyInp: '#recurEditEvery', wdBox: '#recurEditWeekly',
+    mdInp: '#recurEditMonthDay', mdBox: '#recurEditMonthly', unit: '#recurEditUnit',
+  };
+
+  /** Rule from the controls of the builder or the series editor. */
+  function readRule(t) {
+    const freq = RECURRENCE_FREQS.includes($(t.freqSel).value) ? $(t.freqSel).value : 'daily';
+    const interval = clamp(Math.round(Number($(t.everyInp).value) || 1), 1, 12);
+    const weekdays = $$('.wd-chip.on', $(t.wdBox)).map((b) => Number(b.dataset.wd)).sort((a, b) => a - b);
+    const monthDay = clamp(Math.round(Number($(t.mdInp).value) || 1), 1, 31);
+    return {
+      freq,
+      interval,
+      weekdays: freq === 'weekly' && weekdays.length === 0 ? [new Date().getDay()] : weekdays,
+      monthDay,
+    };
+  }
+
+  function recurUnitLabel(freq, interval) {
+    const noun = freq === 'daily' ? 'day' : freq === 'weekly' ? 'week' : 'month';
+    return noun + (interval === 1 ? '' : 's');
+  }
+
+  /** Clamp inputs and show/hide the weekday & day-of-month rows. */
+  function syncRecurUI(t) {
+    const freq = $(t.freqSel).value;
+    $(t.wdBox).hidden = freq !== 'weekly';
+    $(t.mdBox).hidden = freq !== 'monthly';
+    const interval = clamp(Math.round(Number($(t.everyInp).value) || 1), 1, 12);
+    $(t.everyInp).value = String(interval);
+    $(t.mdInp).value = String(clamp(Math.round(Number($(t.mdInp).value) || 1), 1, 31));
+    $(t.unit).textContent = recurUnitLabel(freq, interval);
+  }
+
+  function onFreqChange(t) {
+    // Switching to weekly with nothing selected: start from today's weekday.
+    if ($(t.freqSel).value === 'weekly' && $$('.wd-chip.on', $(t.wdBox)).length === 0) {
+      const wd = new Date().getDay();
+      $$('.wd-chip', $(t.wdBox)).forEach((b) => b.classList.toggle('on', Number(b.dataset.wd) === wd));
+    }
+    syncRecurUI(t);
+    if (t === EDITOR) updateRecurHint();
+  }
+
+  function initBuilderDefaults() {
+    const box = $('#recurBuilder');
+    if (box.dataset.init) return; // keep the user's last configuration
+    box.dataset.init = '1';
+    $('#recurFreq').value = 'daily';
+    $('#recurEvery').value = '1';
+    $('#recurMonthDay').value = String(new Date().getDate());
+    const wd = new Date().getDay();
+    $$('#recurWeeklyPick .wd-chip').forEach((b) => b.classList.toggle('on', Number(b.dataset.wd) === wd));
+    syncRecurUI(BUILDER);
+  }
+
+  function setRecurBuilderOpen(open) {
+    $('#recurBuilder').hidden = !open;
+    const btn = $('#recurToggle');
+    btn.classList.toggle('on', open);
+    btn.setAttribute('aria-pressed', String(open));
+  }
+
+  function submitNewTask() {
+    const input = $('#taskInput');
+    const clean = String(input.value || '').replace(/\s+/g, ' ').trim();
+    if (!clean) return;
+    const title = clean.slice(0, 300);
+    if ($('#recurToggle').classList.contains('on')) {
+      const recur = readRule(BUILDER);
+      state.recurrences.unshift({
+        id: uuid(),
+        title,
+        note: '',
+        recur,
+        startKey: todayKey(),
+        nextDue: todayKey(),
+        createdAt: Date.now(),
+      });
+      reconcileRecurrences(); // materializes today's instance and saves
+      input.value = '';
+      setRecurBuilderOpen(false);
+      renderTasks();
+      renderStats();
+      toast('🔁 Repeats ' + recurShortLabel(recur));
+    } else {
+      addTask(title);
+      input.value = '';
+    }
+  }
+
+  /* ---------- Series editor modal ---------- */
+
+  let recurEditId = null;
+
+  function openRecurModal(rid) {
+    const r = recurrenceById(rid);
+    if (!r) return;
+    recurEditId = rid;
+    $('#recurModalTask').textContent = r.title;
+    $(EDITOR.freqSel).value = r.recur.freq;
+    $(EDITOR.everyInp).value = String(r.recur.interval);
+    $$('.wd-chip', $(EDITOR.wdBox)).forEach((b) => b.classList.toggle('on', r.recur.weekdays.includes(Number(b.dataset.wd))));
+    $(EDITOR.mdInp).value = String(r.recur.monthDay);
+    syncRecurUI(EDITOR);
+    updateRecurHint();
+    $('#recurModal').hidden = false;
+    $('#recurBackdrop').hidden = false;
+    $(EDITOR.freqSel).focus();
+  }
+
+  function closeRecurModal() {
+    if ($('#recurModal').hidden) return;
+    $('#recurModal').hidden = true;
+    $('#recurBackdrop').hidden = true;
+    recurEditId = null;
+  }
+
+  function updateRecurHint() {
+    const r = recurrenceById(recurEditId);
+    if (!r) return;
+    const next = nextOccurrence(todayKey(), readRule(EDITOR), r.startKey, true);
+    let txt = 'Next occurrence: ';
+    if (next === todayKey()) txt += 'today';
+    else if (next) txt += dayToDate(next).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    else txt += '—';
+    $('#recurEditHint').textContent = txt;
+  }
+
+  function saveRecurModal() {
+    const r = recurrenceById(recurEditId);
+    if (r) {
+      r.recur = readRule(EDITOR);
+      // With an open instance, the next spawn lands after today; otherwise a
+      // rule that matches today spawns immediately via reconcile.
+      const hasOpen = state.tasks.some((t) => t.recurrenceId === r.id && !t.done);
+      r.nextDue = nextOccurrence(todayKey(), r.recur, r.startKey, !hasOpen) || r.nextDue;
+      saveState();
+      renderTasks();
+      toast('Repeat updated — ' + recurShortLabel(r.recur));
+    }
+    closeRecurModal();
+  }
+
+  function removeRepeatFlow() {
+    const r = recurrenceById(recurEditId);
+    if (!r) { closeRecurModal(); return; }
+    const rid = r.id;
+    closeRecurModal();
+    confirmDialog({
+      title: 'Stop repeating?',
+      body: '“' + r.title + '” will stop recurring. The current task stays in your list; past history is kept.',
+      confirmLabel: 'Stop repeating',
+    }).then((ok) => {
+      if (!ok) { openRecurModal(rid); return; }
+      state.recurrences = state.recurrences.filter((x) => x.id !== rid);
+      for (const t of state.tasks) {
+        if (t.recurrenceId === rid) {
+          t.recurrenceId = null;
+          t.scheduledFor = null;
+        }
+      }
+      saveState();
+      renderAll();
+      toast('Repeat removed');
+    });
+  }
+
   /* ============================== Events ============================== */
 
   function startEdit(id) {
@@ -1221,6 +1618,11 @@
       case 'activate': activateTask(id); break;
       case 'move-up': moveTask(id, -1); break;
       case 'move-down': moveTask(id, 1); break;
+      case 'edit-recur': {
+        const task = taskById(id);
+        if (task && task.recurrenceId) openRecurModal(task.recurrenceId);
+        break;
+      }
     }
   }
 
@@ -1242,21 +1644,55 @@
       }
     });
 
-    // Task form
+    // Task form (shared path handles plain + recurring adds)
     $('#taskForm').addEventListener('submit', (e) => {
       e.preventDefault();
-      addTask($('#taskInput').value);
-      $('#taskInput').value = '';
+      submitNewTask();
     });
     // Explicit Enter handling: implicit form submission is unreliable on some
     // virtual keyboards and embedded webviews.
     $('#taskInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        addTask($('#taskInput').value);
-        $('#taskInput').value = '';
+        submitNewTask();
       }
     });
+
+    // Recurring tasks — creation builder
+    $('#recurToggle').addEventListener('click', () => {
+      const open = $('#recurBuilder').hidden;
+      if (open) initBuilderDefaults();
+      setRecurBuilderOpen(open);
+    });
+    $('#recurFreq').addEventListener('change', () => onFreqChange(BUILDER));
+    $('#recurEvery').addEventListener('change', () => syncRecurUI(BUILDER));
+    // Live unit label while typing — value clamping stays on `change`.
+    $('#recurEvery').addEventListener('input', () => {
+      const n = clamp(Math.round(Number($('#recurEvery').value) || 1), 1, 12);
+      $('#recurEveryUnit').textContent = recurUnitLabel($('#recurFreq').value, n);
+    });
+    $('#recurMonthDay').addEventListener('change', () => syncRecurUI(BUILDER));
+    $('#recurWeeklyPick').addEventListener('click', (e) => {
+      const chip = e.target.closest('.wd-chip');
+      if (chip) chip.classList.toggle('on');
+    });
+
+    // Recurring tasks — series editor modal
+    $('#recurEditFreq').addEventListener('change', () => onFreqChange(EDITOR));
+    $('#recurEditEvery').addEventListener('change', () => { syncRecurUI(EDITOR); updateRecurHint(); });
+    $('#recurEditMonthDay').addEventListener('change', () => { syncRecurUI(EDITOR); updateRecurHint(); });
+    // Live preview while typing — `input` only refreshes the hint; the
+    // clamping rewrite stays on `change` so it never fights the keystrokes.
+    $('#recurEditEvery').addEventListener('input', updateRecurHint);
+    $('#recurEditMonthDay').addEventListener('input', updateRecurHint);
+    $('#recurEditWeekly').addEventListener('click', (e) => {
+      const chip = e.target.closest('.wd-chip');
+      if (chip) { chip.classList.toggle('on'); updateRecurHint(); }
+    });
+    $('#recurEditSave').addEventListener('click', saveRecurModal);
+    $('#recurEditCancel').addEventListener('click', closeRecurModal);
+    $('#recurBackdrop').addEventListener('click', closeRecurModal);
+    $('#recurRemoveRepeat').addEventListener('click', removeRepeatFlow);
 
     // Task lists (delegated)
     $('#taskList').addEventListener('click', onListClick);
@@ -1390,12 +1826,13 @@
 
       if (e.key === 'Escape') {
         if (!$('#modal').hidden) { closeModal(false); return; }
+        if (!$('#recurModal').hidden) { closeRecurModal(); return; }
         if (!$('#settingsDrawer').hidden) { closeDrawer(); return; }
         if (editingTaskId) { cancelEdit(); return; }
         if (typing && target instanceof HTMLElement) target.blur();
         return;
       }
-      if (!$('#modal').hidden || !$('#settingsDrawer').hidden) return;
+      if (!$('#modal').hidden || !$('#recurModal').hidden || !$('#settingsDrawer').hidden) return;
       if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
 
       const onWidget = target instanceof HTMLElement &&
@@ -1426,10 +1863,12 @@
 
   function init() {
     normalizeTimer();
+    const spawnedOnLoad = reconcileRecurrences();
     applyTheme();
     bindEvents();
     renderSettingsPanel();
     renderAll();
+    if (spawnedOnLoad > 0) toast('🔁 ' + spawnedOnLoad + ' recurring task' + (spawnedOnLoad === 1 ? '' : 's') + ' due');
 
     // Restore an in-flight session. If it ended while the tab was closed,
     // complete it now: log + credit with the true endedAt, then continue.
@@ -1456,6 +1895,9 @@
     completeSession,
     buildExport,
     buildLogseqMarkdown,
+    reconcileRecurrences,
+    nextOccurrence,
+    ruleMatchesDay,
     version: APP_VERSION,
   };
 })();

@@ -63,8 +63,34 @@
   <section class="card tasks-card" aria-label="Tasks">
     <form id="taskForm" class="task-form" autocomplete="off">
       <input id="taskInput" type="text" placeholder="Add a task…  (press N)" maxlength="300" aria-label="New task title">
+      <button type="button" id="recurToggle" class="icon-btn recur-toggle" title="Repeat: daily, weekly or monthly" aria-pressed="false" aria-controls="recurBuilder">🔁</button>
       <button type="submit" class="btn primary">Add</button>
     </form>
+    <div id="recurBuilder" class="recur-builder" hidden>
+      <div class="recur-line">
+        <select id="recurFreq" aria-label="Repeat frequency">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+        <label class="recur-every">every <input type="number" id="recurEvery" min="1" max="12" step="1" value="1"></label>
+        <span class="recur-unit" id="recurEveryUnit">day</span>
+      </div>
+      <div class="wd-row" id="recurWeeklyPick" hidden role="group" aria-label="Weekdays">
+        <button type="button" class="wd-chip" data-wd="0" aria-label="Sunday">S</button>
+        <button type="button" class="wd-chip" data-wd="1" aria-label="Monday">M</button>
+        <button type="button" class="wd-chip" data-wd="2" aria-label="Tuesday">T</button>
+        <button type="button" class="wd-chip" data-wd="3" aria-label="Wednesday">W</button>
+        <button type="button" class="wd-chip" data-wd="4" aria-label="Thursday">T</button>
+        <button type="button" class="wd-chip" data-wd="5" aria-label="Friday">F</button>
+        <button type="button" class="wd-chip" data-wd="6" aria-label="Saturday">S</button>
+      </div>
+      <div class="recur-line" id="recurMonthlyPick" hidden>
+        <label class="recur-every">on day <input type="number" id="recurMonthDay" min="1" max="31" step="1" value="1"></label>
+        <span class="recur-unit">of the month</span>
+      </div>
+      <p class="hint">The task reappears on schedule — click its 🔁 badge any time to adjust.</p>
+    </div>
     <ul id="taskList" class="task-list"></ul>
     <div id="doneSection" class="done-section" hidden>
       <button id="doneToggle" class="done-toggle" aria-expanded="true"></button>
@@ -148,6 +174,40 @@
   <div class="modal-actions">
     <button class="btn" id="modalCancel">Cancel</button>
     <button class="btn primary" id="modalConfirm">OK</button>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="recurBackdrop" hidden></div>
+<div class="modal" id="recurModal" hidden role="dialog" aria-modal="true" aria-labelledby="recurModalTitle">
+  <h3 id="recurModalTitle">Repeat schedule</h3>
+  <p id="recurModalTask" class="modal-task-name"></p>
+  <div class="recur-line">
+    <select id="recurEditFreq" aria-label="Repeat frequency">
+      <option value="daily">Daily</option>
+      <option value="weekly">Weekly</option>
+      <option value="monthly">Monthly</option>
+    </select>
+    <label class="recur-every">every <input type="number" id="recurEditEvery" min="1" max="12" step="1" value="1"></label>
+    <span class="recur-unit" id="recurEditUnit">day</span>
+  </div>
+  <div class="wd-row" id="recurEditWeekly" hidden role="group" aria-label="Weekdays">
+    <button type="button" class="wd-chip" data-wd="0" aria-label="Sunday">S</button>
+    <button type="button" class="wd-chip" data-wd="1" aria-label="Monday">M</button>
+    <button type="button" class="wd-chip" data-wd="2" aria-label="Tuesday">T</button>
+    <button type="button" class="wd-chip" data-wd="3" aria-label="Wednesday">W</button>
+    <button type="button" class="wd-chip" data-wd="4" aria-label="Thursday">T</button>
+    <button type="button" class="wd-chip" data-wd="5" aria-label="Friday">F</button>
+    <button type="button" class="wd-chip" data-wd="6" aria-label="Saturday">S</button>
+  </div>
+  <div class="recur-line" id="recurEditMonthly" hidden>
+    <label class="recur-every">on day <input type="number" id="recurEditMonthDay" min="1" max="31" step="1" value="1"></label>
+    <span class="recur-unit">of the month</span>
+  </div>
+  <p class="hint" id="recurEditHint"></p>
+  <div class="modal-actions">
+    <button class="btn danger-outline" id="recurRemoveRepeat">Stop repeating</button>
+    <button class="btn" id="recurEditCancel">Cancel</button>
+    <button class="btn primary" id="recurEditSave">Save</button>
   </div>
 </div>
 
