@@ -134,7 +134,10 @@ kbd {
 .stats-card { grid-column: 1 / -1; }
 
 @media (max-width: 760px) {
-  .layout { grid-template-columns: 1fr; }
+  /* minmax(0, 1fr) instead of 1fr: a plain 1fr track has an auto (min-content)
+     floor, so a long white-space:nowrap task title would stretch the whole
+     grid and force a horizontal scrollbar. */
+  .layout { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ---------- Buttons ---------- */
@@ -405,6 +408,9 @@ select:focus {
 }
 .task-title-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .task-title {
+  /* display: block is required when the span is not a flex item (done list):
+     max-width/overflow/text-overflow are ignored on plain inline elements. */
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

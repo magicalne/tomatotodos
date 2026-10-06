@@ -1241,7 +1241,7 @@
         '<button class="check-btn" data-action="toggle-done" aria-label="Mark &quot;' + esc(task.title) + '&quot; done" title="Mark done">✓</button>' +
         '<div class="task-main">' +
           '<div class="task-title-line">' +
-            '<span class="task-title">' + esc(task.title) + '</span>' +
+            '<span class="task-title" title="' + esc(task.title) + '">' + esc(task.title) + '</span>' +
             dueBadgeHTML(task) +
             recurBadgeHTML(task) +
             (task.note ? '<span class="badge" title="' + esc(task.note) + '">📝</span>' : '') +
@@ -1281,7 +1281,7 @@
     return (
       '<li class="task done" data-id="' + task.id + '">' +
         '<button class="check-btn checked" data-action="toggle-done" aria-label="Mark not done" title="Mark not done">✓</button>' +
-        '<div class="task-main"><span class="task-title">' + esc(task.title) + '</span></div>' +
+        '<div class="task-main"><span class="task-title" title="' + esc(task.title) + '">' + esc(task.title) + '</span></div>' +
         '<div class="task-stats">' + (st.pomodoros ? '🍅 ' + st.pomodoros : '') + '</div>' +
         '<span class="done-at">' + (task.completedAt ? fmtTimeOfDay(task.completedAt) : '') + '</span>' +
         '<div class="task-actions">' +
