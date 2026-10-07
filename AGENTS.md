@@ -19,6 +19,8 @@ See [README.md](README.md) for what the app does. Essentials: static HTML + CSS 
 
   Constants → Helpers → Storage → State → Theme → Audio & notifications → Timer engine → Tasks → Recurring tasks → Stats → Export / import / Logseq → Rendering → Drawer / modal / toast → Recurring task UI → Events → Init
 
+- `history.html` + `history.js` — read-only history page (query finished tasks). It deliberately does **not** load `app.js`: a few tiny helpers are duplicated so the timer runtime never boots there, and it must never write task data (theme setting is its only write).
+
 Put new code in the matching section. `esc()` any user string before it enters HTML.
 
 ## docs/ — shared memory
@@ -40,6 +42,7 @@ python3 -m http.server 8000   # open http://localhost:8000
 - Timer changes: reload mid-session (must restore), background the tab, session ending while the tab is closed.
 - Storage/schema changes: corrupted `localStorage` key must not crash the app; old export files still import.
 - Recurrence changes: materialization at load and midnight rollover; missed days collapse into one ⚠ overdue instance.
+- History page changes: corrupt `localStorage` renders empty (never crashes); URL-param filters (`?q=&range=&tags=`) round-trip; no task data is written.
 - Always: add / edit / delete / reorder tasks, stats render, export/import round-trip, both themes, small viewport.
 
 ## Commits

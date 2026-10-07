@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>History · 🍅 Tomato Todos</title>
+<meta name="description" content="Query finished tasks and past focus time. All data stays in your browser.">
+<meta name="theme-color" content="#f5f3f0">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script>
+/* Same pre-paint theme application as index.html. */
+(function () {
+  try {
+    var s = JSON.parse(localStorage.getItem('tomato-todos:settings') || '{}');
+    var pref = s && (s.theme === 'light' || s.theme === 'dark') ? s.theme : 'auto';
+    var dark = pref === 'dark' || (pref === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  } catch (e) { /* fall back to light */ }
+})();
+</script>
+</head>
+<body>
+
+<header class="app-header">
+  <h1><a class="back-link" href="index.html" title="Back to the timer" aria-label="Back to the timer">←</a> 🍅 History</h1>
+  <div class="header-actions">
+    <button id="themeBtn" class="icon-btn header-btn" title="Theme (click to cycle)">🌗</button>
+  </div>
+</header>
+
+<main class="layout history-layout">
+
+  <section class="card history-card" aria-label="Finished task history">
+    <div class="history-filters">
+      <input id="hq" type="search" placeholder="Search finished tasks…  (press /)" autocomplete="off" aria-label="Search finished tasks">
+      <div class="range-row" role="group" aria-label="Date range">
+        <button type="button" class="range-chip" data-range="today">Today</button>
+        <button type="button" class="range-chip" data-range="yesterday">Yesterday</button>
+        <button type="button" class="range-chip" data-range="7d">7 days</button>
+        <button type="button" class="range-chip" data-range="30d">30 days</button>
+        <button type="button" class="range-chip" data-range="all">All time</button>
+        <span class="custom-dates">
+          <input type="date" id="hfrom" aria-label="From date"> –
+          <input type="date" id="hto" aria-label="To date">
+        </span>
+      </div>
+      <div class="tag-picker" id="htagfilter" aria-label="Filter by tags"></div>
+    </div>
+    <div id="results"></div>
+    <div class="history-foot">
+      <button type="button" id="loadMore" class="btn" hidden>Load more</button>
+      <p class="hint" id="historySummary"></p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="app-footer">
+  Read-only view of this browser's finished tasks · <a class="footer-link" href="index.html">back to the timer</a>
+  <span class="footer-note">— everything stays in your browser 🍅</span>
+</footer>
+
+<noscript><p class="noscript">🍅 History needs JavaScript enabled.</p></noscript>
+
+<script src="history.js"></script>
+</body>
+</html>

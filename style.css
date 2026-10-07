@@ -218,6 +218,7 @@ kbd {
   font-size: 14px;
   line-height: 1;
   color: var(--muted);
+  text-decoration: none;
   transition: background 0.12s ease, color 0.12s ease;
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--text); }
@@ -356,7 +357,7 @@ kbd {
   min-width: 0;
 }
 
-input[type="text"], input[type="number"], textarea {
+input[type="text"], input[type="number"], input[type="search"], input[type="date"], textarea {
   font: inherit;
   color: var(--text);
   background: var(--surface);
@@ -364,7 +365,7 @@ input[type="text"], input[type="number"], textarea {
   border-radius: var(--radius-sm);
   padding: 8px 10px;
 }
-input[type="text"]:focus, input[type="number"]:focus, textarea:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="search"]:focus, input[type="date"]:focus, textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
@@ -711,13 +712,15 @@ button.tag-chip:hover { border-color: var(--muted); }
   font-variant-numeric: tabular-nums;
   margin-top: 4px;
 }
-.done-earlier-label {
-  font-size: 11.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  padding: 10px 8px 2px;
+.done-overflow {
+  display: inline-block;
+  margin: 6px 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: none;
 }
+.done-overflow:hover { text-decoration: underline; }
 
 .empty {
   padding: 18px 10px;
@@ -970,6 +973,92 @@ button.tag-chip:hover { border-color: var(--muted); }
   text-align: center;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- History page ---------- */
+
+.history-layout {
+  max-width: 820px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.back-link {
+  text-decoration: none;
+  margin-right: 6px;
+  color: var(--muted);
+}
+.back-link:hover { color: var(--text); }
+
+.footer-link { color: var(--muted); }
+
+.history-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.history-filters input[type="search"] { width: 100%; }
+
+.range-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.range-chip {
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 4px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  transition: all 0.12s ease;
+}
+.range-chip:hover { color: var(--text); border-color: var(--muted); }
+.range-chip.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+.custom-dates {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+  margin-left: auto;
+}
+.custom-dates input[type="date"] {
+  padding: 3px 7px;
+  font-size: 12.5px;
+}
+
+.day-group { margin-top: 18px; }
+.day-group:first-child { margin-top: 4px; }
+.day-head {
+  font-size: 15px;
+  margin: 0 0 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.day-stats {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* History rows are read-only — the check mark is not a button. */
+.history-card .check-btn { cursor: default; }
+
+.history-foot {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.history-foot .hint { margin: 0; }
 
 /* ---------- Motion preferences ---------- */
 

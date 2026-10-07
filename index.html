@@ -26,6 +26,7 @@
 <header class="app-header">
   <h1>🍅 Tomato Todos</h1>
   <div class="header-actions">
+    <a class="icon-btn header-btn" href="history.html" title="History of finished tasks" aria-label="History">📚</a>
     <button id="themeBtn" class="icon-btn header-btn" title="Theme (click to cycle)">🌗</button>
     <button id="settingsBtn" class="icon-btn header-btn" title="Settings" aria-haspopup="dialog">⚙️</button>
   </div>
@@ -104,6 +105,7 @@
     <div id="doneSection" class="done-section" hidden>
       <button id="doneToggle" class="done-toggle" aria-expanded="true"></button>
       <ul id="doneList" class="task-list done-list"></ul>
+      <a id="doneOverflow" class="done-overflow" href="history.html?range=today" hidden></a>
     </div>
   </section>
 

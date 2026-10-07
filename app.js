@@ -51,6 +51,7 @@
   const MAX_TAGS = 32;                // registry cap
   const MAX_TAGS_PER_TASK = 6;        // per-task cap
   const MAX_BODY = 5000;              // task description cap (chars)
+  const DONE_TODAY_CAP = 10;          // main list shows today's newest 10; older days live in history.html
 
   /* ============================== Helpers ============================== */
 
@@ -1397,10 +1398,13 @@
     );
   }
 
+  /** The main list is a working surface: today's finishes only, newest first,
+   * capped — everything older is queried on history.html. */
   function renderTasks() {
     const open = state.tasks.filter((t) => !t.done);
-    const doneToday = state.tasks.filter((t) => t.done && t.completedAt && dayKey(t.completedAt) === todayKey());
-    const doneEarlier = state.tasks.filter((t) => t.done && !(t.completedAt && dayKey(t.completedAt) === todayKey()));
+    const doneToday = state.tasks
+      .filter((t) => t.done && t.completedAt && dayKey(t.completedAt) === todayKey())
+      .sort((a, b) => b.completedAt - a.completedAt);
 
     const list = $('#taskList');
     list.innerHTML = open.length
@@ -1413,17 +1417,17 @@
       if (ta) autosize(ta);
     }
 
-    const doneCount = doneToday.length + doneEarlier.length;
-    $('#doneSection').hidden = doneCount === 0;
+    $('#doneSection').hidden = doneToday.length === 0;
     const toggle = $('#doneToggle');
     toggle.textContent = (ui.doneOpen ? '▾' : '▸') + ' ✓ Done today (' + doneToday.length + ')';
     toggle.setAttribute('aria-expanded', String(ui.doneOpen));
     const doneList = $('#doneList');
     doneList.hidden = !ui.doneOpen;
-    doneList.innerHTML =
-      doneToday.map(doneRowHTML).join('') +
-      (doneEarlier.length ? '<li class="done-earlier-label">before today</li>' : '') +
-      doneEarlier.map(doneRowHTML).join('');
+    doneList.innerHTML = doneToday.slice(0, DONE_TODAY_CAP).map(doneRowHTML).join('');
+    const extra = doneToday.length - DONE_TODAY_CAP;
+    const overflow = $('#doneOverflow');
+    overflow.hidden = extra <= 0;
+    if (extra > 0) overflow.textContent = '+' + extra + ' more finished today — open history →';
   }
 
   function renderStats() {
