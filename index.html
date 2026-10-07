@@ -63,9 +63,18 @@
   <section class="card tasks-card" aria-label="Tasks">
     <form id="taskForm" class="task-form" autocomplete="off">
       <input id="taskInput" type="text" placeholder="Add a task…  (press N)" maxlength="300" aria-label="New task title">
+      <button type="button" id="composerToggle" class="icon-btn recur-toggle" title="Add description &amp; tags" aria-pressed="false" aria-controls="composerPanel">📝</button>
       <button type="button" id="recurToggle" class="icon-btn recur-toggle" title="Repeat: daily, weekly or monthly" aria-pressed="false" aria-controls="recurBuilder">🔁</button>
       <button type="submit" class="btn primary">Add</button>
     </form>
+    <div id="composerPanel" class="composer" hidden aria-label="Task details">
+      <textarea id="taskBody" class="autogrow" rows="2" maxlength="5000" placeholder="Add a description…" aria-label="Task description"></textarea>
+      <div class="tag-picker" id="composerTags"></div>
+      <div class="composer-actions">
+        <span class="composer-hint"><kbd>Ctrl/⌘</kbd>+<kbd>↵</kbd> add · <kbd>Esc</kbd> closes</span>
+        <button type="button" id="composerCancel" class="btn small">Close</button>
+      </div>
+    </div>
     <div id="recurBuilder" class="recur-builder" hidden>
       <div class="recur-line">
         <select id="recurFreq" aria-label="Repeat frequency">

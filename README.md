@@ -7,6 +7,7 @@ A todo list fused with a pomodoro timer and per-task time tracking. Pure **HTML 
 ## Features
 
 - **Tasks** — add, inline-edit (double-click or ✏️), delete, complete/un-complete, reorder (↑/↓), optional note and due-today flag. Mark one task **active** (🎯) and every focus session's time is credited to it.
+- **Rich composer & tags** — the 📝 button expands the quick-add into a GitHub-issue-style composer: title + multi-line description + colored tags (8-color palette, create tags inline). The quick path (type + Enter) is unchanged. See `docs/specs/rich-task-composer.md`.
 - **Recurring tasks** — click the 🔁 button next to *Add* to create a task that **repeats daily, weekly or monthly** (optionally "every N" days/weeks/months; weekly lets you pick weekdays, monthly a day of month). Each occurrence materializes as a normal task on its due day — at app load, or instantly at midnight if the app stays open — and missed days collapse into a single (⚠ overdue) instance instead of piling up. Completing or deleting an occurrence only affects that day; the series keeps its schedule. Click the 🔁 badge on an instance to edit the series or stop repeating. Renaming an instance renames the series.
 - **Pomodoro timer** — focus (default 24 min) / short break (5) / long break (15, after every 4 focus sessions — all configurable). Start / pause / resume / skip / reset. Auto-start breaks and auto-start next focus are toggleable.
   - The timer is **timestamp-based**: it stores `endsAt` and recomputes remaining time from the wall clock, so background-tab throttling and closed tabs never cause drift. Reload mid-session and the in-flight session is restored — including sessions that ended while the tab was closed (they get logged and credited with the correct end time).
@@ -24,6 +25,7 @@ A todo list fused with a pomodoro timer and per-task time tracking. Pure **HTML 
 | `N` | Focus the "new task" input |
 | `1` / `2` / `3` | Focus / short break / long break mode |
 | `Esc` | Cancel edit · close settings · close dialog |
+| `Ctrl/⌘+Enter` | Add task from the expanded composer |
 
 ## Run it
 
@@ -54,7 +56,7 @@ This repo is already deployed via **Settings → Pages → Source: "Deploy from 
 
 ## Data & storage
 
-`localStorage` keys: `tomato-todos:settings`, `tomato-todos:tasks`, `tomato-todos:recurrences`, `tomato-todos:sessions`, `tomato-todos:timer`, `tomato-todos:ui`.
+`localStorage` keys: `tomato-todos:settings`, `tomato-todos:tasks`, `tomato-todos:tags`, `tomato-todos:recurrences`, `tomato-todos:sessions`, `tomato-todos:timer`, `tomato-todos:ui`.
 
 - **Export JSON** writes a single `{app, version, exportedAt, settings, tasks, recurrences, sessions, timer}` file; **Import JSON** restores it losslessly (with validation).
 - **Logseq export** for today looks like:

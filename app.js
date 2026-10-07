@@ -19,6 +19,7 @@
   const KEYS = {
     settings: APP + ':settings',
     tasks: APP + ':tasks',
+    tags: APP + ':tags',
     recurrences: APP + ':recurrences',
     sessions: APP + ':sessions',
     timer: APP + ':timer',
@@ -44,6 +45,12 @@
   const MIN_LOGGED_SKIP_MS = 1000; // skipping a session shorter than this logs nothing
   const BASE_TITLE = '🍅 Tomato Todos';
   const RING_C = 2 * Math.PI * 106; // progress-ring circumference (r=106, viewBox 240)
+  // Tags & task body (rich composer)
+  const TAG_COLORS = 8;               // fixed palette size; tags store an index
+  const TAG_COLOR_NAMES = ['red', 'orange', 'amber', 'green', 'teal', 'blue', 'purple', 'pink'];
+  const MAX_TAGS = 32;                // registry cap
+  const MAX_TAGS_PER_TASK = 6;        // per-task cap
+  const MAX_BODY = 5000;              // task description cap (chars)
 
   /* ============================== Helpers ============================== */
 
@@ -162,7 +169,11 @@
       out.push({
         id,
         title,
-        note: toStr(t.note).slice(0, 1000),
+        // Legacy single-line `note` migrates into `body`; new code writes only body.
+        body: toStr(t.body).slice(0, MAX_BODY) || toStr(t.note).replace(/\s+/g, ' ').trim().slice(0, 1000),
+        tagIds: Array.isArray(t.tagIds)
+          ? Array.from(new Set(t.tagIds.filter((x) => typeof x === 'string'))).slice(0, MAX_TAGS_PER_TASK)
+          : [],
         dueToday: toBool(t.dueToday, false),
         done: toBool(t.done, false),
         createdAt: toNum(t.createdAt, Date.now()),
@@ -171,6 +182,33 @@
         recurrenceId: toStr(t.recurrenceId) || null,
         scheduledFor: isDayKey(t.scheduledFor) ? t.scheduledFor : null,
       });
+    }
+    return out;
+  }
+
+  function sanitizeTags(raw) {
+    if (!Array.isArray(raw)) return [];
+    const seenIds = new Set();
+    const seenLabels = new Set();
+    const out = [];
+    for (const t of raw) {
+      if (!t || typeof t !== 'object') continue;
+      const label = toStr(t.label).replace(/\s+/g, ' ').trim().slice(0, 24);
+      if (!label) continue;
+      const key = label.toLowerCase();
+      if (seenLabels.has(key)) continue;
+      let id = toStr(t.id);
+      if (!id || seenIds.has(id)) id = uuid();
+      seenIds.add(id);
+      seenLabels.add(key);
+      out.push({
+        id,
+        label,
+        // Color is an index into the fixed palette, never raw hex.
+        color: clamp(Math.round(toNum(t.color, 0)), 0, TAG_COLORS - 1),
+        createdAt: toNum(t.createdAt, Date.now()),
+      });
+      if (out.length >= MAX_TAGS) break;
     }
     return out;
   }
@@ -196,7 +234,10 @@
       out.push({
         id,
         title,
-        note: toStr(r.note).slice(0, 1000),
+        body: toStr(r.body).slice(0, MAX_BODY) || toStr(r.note).replace(/\s+/g, ' ').trim().slice(0, 1000),
+        tagIds: Array.isArray(r.tagIds)
+          ? Array.from(new Set(r.tagIds.filter((x) => typeof x === 'string'))).slice(0, MAX_TAGS_PER_TASK)
+          : [],
         recur: {
           freq,
           interval: clamp(Math.round(toNum(rawRecur.interval, 1)), 1, 12),
@@ -258,9 +299,22 @@
 
   /* ============================== State ============================== */
 
+  // First run (no stored tags yet): seed a few example tags so the system is
+  // discoverable. A corrupted value sanitizes to an empty registry instead.
+  function seedTags() {
+    const now = Date.now();
+    return [
+      { id: uuid(), label: 'work', color: 5, createdAt: now },
+      { id: uuid(), label: 'home', color: 3, createdAt: now },
+      { id: uuid(), label: 'learning', color: 6, createdAt: now },
+    ];
+  }
+
+  const rawTagsStored = readJSON(KEYS.tags);
   const state = {
     settings: sanitizeSettings(readJSON(KEYS.settings) ?? {}),
     tasks: sanitizeTasks(readJSON(KEYS.tasks) ?? []),
+    tags: rawTagsStored == null ? seedTags() : sanitizeTags(rawTagsStored),
     recurrences: sanitizeRecurrences(readJSON(KEYS.recurrences) ?? []),
     sessions: sanitizeSessions(readJSON(KEYS.sessions) ?? []),
     timer: sanitizeTimer(readJSON(KEYS.timer) ?? {}),
@@ -300,6 +354,7 @@
   function saveState() {
     writeJSON(KEYS.settings, state.settings);
     writeJSON(KEYS.tasks, state.tasks);
+    writeJSON(KEYS.tags, state.tags);
     writeJSON(KEYS.recurrences, state.recurrences);
     writeJSON(KEYS.sessions, state.sessions);
     writeJSON(KEYS.timer, state.timer);
@@ -681,13 +736,28 @@
     return state.tasks.find((t) => t.id === id) || null;
   }
 
-  function addTask(title) {
+  function tagById(id) {
+    return state.tags.find((t) => t.id === id) || null;
+  }
+
+  /** A task's tags resolved against the registry (dangling ids are dropped). */
+  function taskTags(task) {
+    return (task.tagIds || []).map(tagById).filter(Boolean);
+  }
+
+  /** Keep only known ids, deduped, capped. */
+  function cleanTagIds(ids) {
+    return Array.from(new Set((Array.isArray(ids) ? ids : []).filter((id) => tagById(id)))).slice(0, MAX_TAGS_PER_TASK);
+  }
+
+  function addTask(title, body, tagIds) {
     const clean = String(title || '').replace(/\s+/g, ' ').trim();
     if (!clean) return;
     state.tasks.unshift({
       id: uuid(),
       title: clean.slice(0, 300),
-      note: '',
+      body: String(body || '').trim().slice(0, MAX_BODY),
+      tagIds: cleanTagIds(tagIds),
       dueToday: false,
       done: false,
       createdAt: Date.now(),
@@ -747,14 +817,16 @@
       const clean = String(patch.title).replace(/\s+/g, ' ').trim();
       if (clean) task.title = clean.slice(0, 300);
     }
-    if (patch.note != null) task.note = String(patch.note).slice(0, 1000);
+    if (patch.body != null) task.body = String(patch.body).trim().slice(0, MAX_BODY);
+    if (patch.tagIds != null) task.tagIds = cleanTagIds(patch.tagIds);
     if (patch.dueToday != null) task.dueToday = !!patch.dueToday;
     // Renaming an instance renames the series; past instances keep their titles.
     if (task.recurrenceId) {
       const r = recurrenceById(task.recurrenceId);
       if (r) {
         if (patch.title != null) r.title = task.title;
-        if (patch.note != null) r.note = task.note;
+        if (patch.body != null) r.body = task.body;
+        if (patch.tagIds != null) r.tagIds = task.tagIds.slice();
       }
     }
     saveState();
@@ -853,7 +925,8 @@
         state.tasks.unshift({
           id: uuid(),
           title: r.title,
-          note: r.note,
+          body: r.body,
+          tagIds: (r.tagIds || []).slice(),
           dueToday: true,
           done: false,
           createdAt: Date.now(),
@@ -983,6 +1056,7 @@
       exportedAt: new Date().toISOString(),
       settings: state.settings,
       tasks: state.tasks,
+      tags: state.tags,
       recurrences: state.recurrences,
       sessions: state.sessions,
       timer: state.timer,
@@ -1033,6 +1107,7 @@
         const next = {
           settings: sanitizeSettings(obj.settings),
           tasks: sanitizeTasks(obj.tasks),
+          tags: sanitizeTags(obj.tags),
           recurrences: sanitizeRecurrences(obj.recurrences),
           sessions: sanitizeSessions(obj.sessions),
           timer: sanitizeTimer(obj.timer),
@@ -1047,6 +1122,7 @@
           if (!ok) return;
           state.settings = next.settings;
           state.tasks = next.tasks;
+          state.tags = next.tags;
           state.recurrences = next.recurrences;
           state.sessions = next.sessions;
           state.timer = next.timer;
@@ -1148,6 +1224,7 @@
       } catch (e) { /* best effort */ }
       state.settings = deepCopy(DEFAULT_SETTINGS);
       state.tasks = [];
+      state.tags = [];
       state.recurrences = [];
       state.sessions = [];
       state.timer = {
@@ -1163,6 +1240,7 @@
         sessionTaskTitle: null,
       };
       editingTaskId = null;
+      resetComposer();
       applyTheme();
       saveState();
       renderAll();
@@ -1212,6 +1290,31 @@
     }
   }
 
+  /* ---------- Tags rendering ---------- */
+
+  function renderTagPicker(selectedIds) {
+    const sel = new Set(selectedIds || []);
+    const chips = state.tags.map((t) =>
+      '<button type="button" class="tag-chip tag-c' + t.color + (sel.has(t.id) ? ' on' : '') +
+      '" data-tag-id="' + t.id + '" data-action="toggle-tag" aria-pressed="' + sel.has(t.id) +
+      '" title="Tag: ' + esc(t.label) + '"><span class="dot"></span>' + esc(t.label) + '</button>'
+    );
+    chips.push('<button type="button" class="tag-chip add-tag" data-action="new-tag" title="Create a tag">+ tag</button>');
+    return chips.join('');
+  }
+
+  /** Currently selected tag ids in a picker container (source of truth = DOM). */
+  function pickerSelectedIds(container) {
+    return $$('.tag-chip.on', container).map((b) => b.dataset.tagId).filter(Boolean);
+  }
+
+  /** Non-interactive colored chips for task rows. */
+  function taskTagsHTML(task) {
+    return taskTags(task).map((t) =>
+      '<span class="tag-chip mini tag-c' + t.color + '" title="Tag: ' + esc(t.label) + '"><span class="dot"></span>' + esc(t.label) + '</span>'
+    ).join('');
+  }
+
   /** ⚑ today badge; recurring instances that missed their day show as overdue instead. */
   function dueBadgeHTML(task) {
     if (!task.dueToday) return '';
@@ -1244,9 +1347,11 @@
             '<span class="task-title" title="' + esc(task.title) + '">' + esc(task.title) + '</span>' +
             dueBadgeHTML(task) +
             recurBadgeHTML(task) +
-            (task.note ? '<span class="badge" title="' + esc(task.note) + '">📝</span>' : '') +
+            taskTagsHTML(task) +
           '</div>' +
-          (task.note ? '<div class="task-note">' + esc(task.note) + '</div>' : '') +
+          (task.body
+            ? '<div class="task-body" data-action="toggle-body" title="Click to expand/collapse">' + esc(task.body) + '</div>'
+            : '') +
         '</div>' +
         '<div class="task-stats">' + stats + '</div>' +
         '<div class="task-actions">' +
@@ -1265,7 +1370,8 @@
       '<li class="task editing" data-id="' + task.id + '">' +
         '<form class="task-edit">' +
           '<input class="edit-title" name="title" value="' + esc(task.title) + '" maxlength="300" autocomplete="off" aria-label="Task title">' +
-          '<input class="edit-note" name="note" value="' + esc(task.note) + '" placeholder="Note (optional)" maxlength="1000" autocomplete="off" aria-label="Task note">' +
+          '<textarea class="edit-body autogrow" name="body" maxlength="5000" rows="2" placeholder="Description (optional)" aria-label="Task description">' + esc(task.body) + '</textarea>' +
+          '<div class="tag-picker">' + renderTagPicker(task.tagIds) + '</div>' +
           '<label class="edit-due"><input type="checkbox" name="dueToday"' + (task.dueToday ? ' checked' : '') + '> due today</label>' +
           '<div class="edit-actions">' +
             '<button type="submit" class="btn small primary">Save</button>' +
@@ -1281,7 +1387,7 @@
     return (
       '<li class="task done" data-id="' + task.id + '">' +
         '<button class="check-btn checked" data-action="toggle-done" aria-label="Mark not done" title="Mark not done">✓</button>' +
-        '<div class="task-main"><span class="task-title" title="' + esc(task.title) + '">' + esc(task.title) + '</span></div>' +
+        '<div class="task-main"><div class="task-title-line"><span class="task-title" title="' + esc(task.title) + '">' + esc(task.title) + '</span>' + taskTagsHTML(task) + '</div></div>' +
         '<div class="task-stats">' + (st.pomodoros ? '🍅 ' + st.pomodoros : '') + '</div>' +
         '<span class="done-at">' + (task.completedAt ? fmtTimeOfDay(task.completedAt) : '') + '</span>' +
         '<div class="task-actions">' +
@@ -1303,6 +1409,8 @@
     if (editingTaskId) {
       const inp = list.querySelector('.task.editing .edit-title');
       if (inp) { inp.focus(); inp.select(); }
+      const ta = list.querySelector('.task.editing .edit-body');
+      if (ta) autosize(ta);
     }
 
     const doneCount = doneToday.length + doneEarlier.length;
@@ -1486,17 +1594,51 @@
     btn.setAttribute('aria-pressed', String(open));
   }
 
+  /* ---------- Rich composer (description + tags) ---------- */
+
+  /** Auto-grow a textarea to fit its content, scrolling past `max` px. */
+  function autosize(ta) {
+    if (!ta) return;
+    ta.style.height = 'auto';
+    const max = 240;
+    ta.style.height = Math.min(ta.scrollHeight, max) + 'px';
+    ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
+  }
+
+  function composerOpen() {
+    return !$('#composerPanel').hidden;
+  }
+
+  function setComposerOpen(open) {
+    $('#composerPanel').hidden = !open;
+    const btn = $('#composerToggle');
+    btn.classList.toggle('on', open);
+    btn.setAttribute('aria-pressed', String(open));
+    $('#taskInput').placeholder = open ? 'Task title' : 'Add a task…  (press N)';
+    if (open) autosize($('#taskBody'));
+  }
+
+  /** Collapse the composer and clear everything it holds. */
+  function resetComposer() {
+    $('#taskBody').value = '';
+    $('#composerTags').innerHTML = renderTagPicker([]);
+    setComposerOpen(false);
+  }
+
   function submitNewTask() {
     const input = $('#taskInput');
     const clean = String(input.value || '').replace(/\s+/g, ' ').trim();
     if (!clean) return;
     const title = clean.slice(0, 300);
+    const body = $('#taskBody').value.trim().slice(0, MAX_BODY);
+    const tagIds = pickerSelectedIds($('#composerTags'));
     if ($('#recurToggle').classList.contains('on')) {
       const recur = readRule(BUILDER);
       state.recurrences.unshift({
         id: uuid(),
         title,
-        note: '',
+        body,
+        tagIds,
         recur,
         startKey: todayKey(),
         nextDue: todayKey(),
@@ -1504,14 +1646,64 @@
       });
       reconcileRecurrences(); // materializes today's instance and saves
       input.value = '';
+      resetComposer();
       setRecurBuilderOpen(false);
       renderTasks();
       renderStats();
       toast('🔁 Repeats ' + recurShortLabel(recur));
     } else {
-      addTask(title);
+      addTask(title, body, tagIds);
       input.value = '';
+      resetComposer();
     }
+  }
+
+  /* ---------- Tag creation (inline, inside any picker) ---------- */
+
+  function openTagCreate(picker, addBtn) {
+    if ($('.tag-create', picker)) return;
+    addBtn.hidden = true;
+    const swatches = Array.from({ length: TAG_COLORS }, (_, i) =>
+      '<button type="button" class="swatch sw-c' + i + (i === 0 ? ' on' : '') +
+      '" data-action="pick-color" data-color="' + i + '" title="' + TAG_COLOR_NAMES[i] +
+      '" aria-label="Color: ' + TAG_COLOR_NAMES[i] + '"></button>'
+    ).join('');
+    const row = document.createElement('span');
+    row.className = 'tag-create';
+    row.innerHTML =
+      '<input type="text" class="tag-name" maxlength="24" placeholder="new tag" aria-label="New tag name">' +
+      '<span class="tag-swatches">' + swatches + '</span>' +
+      '<button type="button" class="icon-btn" data-action="cancel-create-tag" title="Cancel (Esc)" aria-label="Cancel">✕</button>';
+    picker.appendChild(row);
+    $('.tag-name', row).focus();
+  }
+
+  function closeTagCreate(picker) {
+    const row = $('.tag-create', picker);
+    if (row) row.remove();
+    const addBtn = $('.add-tag', picker);
+    if (addBtn) addBtn.hidden = false;
+  }
+
+  function submitTagCreate(picker) {
+    const row = $('.tag-create', picker);
+    if (!row) return;
+    const label = String(($('.tag-name', row) || {}).value || '').replace(/\s+/g, ' ').trim().slice(0, 24);
+    if (!label) { closeTagCreate(picker); return; }
+    const color = clamp(Math.round(Number(($('.swatch.on', row) || {}).dataset?.color) || 0), 0, TAG_COLORS - 1);
+    const key = label.toLowerCase();
+    let tag = state.tags.find((t) => t.label.toLowerCase() === key);
+    if (!tag) {
+      if (state.tags.length >= MAX_TAGS) { toast('Tag limit reached (' + MAX_TAGS + ')'); return; }
+      tag = { id: uuid(), label, color, createdAt: Date.now() };
+      state.tags.push(tag);
+      saveState();
+    }
+    // Re-render just this picker, keeping the user's current selection.
+    const selected = pickerSelectedIds(picker);
+    if (!selected.includes(tag.id)) selected.push(tag.id);
+    picker.innerHTML = renderTagPicker(selected);
+    toast('Tag “' + tag.label + '” ready');
   }
 
   /* ---------- Series editor modal ---------- */
@@ -1618,6 +1810,8 @@
       case 'activate': activateTask(id); break;
       case 'move-up': moveTask(id, -1); break;
       case 'move-down': moveTask(id, 1); break;
+      // Direct DOM toggle — no re-render, so text selection is not disturbed.
+      case 'toggle-body': btn.classList.toggle('expanded'); break;
       case 'edit-recur': {
         const task = taskById(id);
         if (task && task.recurrenceId) openRecurModal(task.recurrenceId);
@@ -1650,11 +1844,67 @@
       submitNewTask();
     });
     // Explicit Enter handling: implicit form submission is unreliable on some
-    // virtual keyboards and embedded webviews.
+    // virtual keyboards and embedded webviews. With the composer open, Enter
+    // moves to the description instead of submitting.
     $('#taskInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
+        if (composerOpen()) { $('#taskBody').focus(); return; }
         submitNewTask();
+      }
+    });
+
+    // Rich composer
+    $('#composerToggle').addEventListener('click', () => setComposerOpen(!composerOpen()));
+    $('#composerCancel').addEventListener('click', () => { setComposerOpen(false); $('#taskInput').focus(); });
+    $('#composerPanel').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        submitNewTask();
+      }
+    });
+
+    // Textareas marked .autogrow resize to fit their content as you type.
+    document.addEventListener('input', (e) => {
+      if (e.target.matches && e.target.matches('textarea.autogrow')) autosize(e.target);
+    });
+
+    // Tag pickers (composer + edit rows share one delegated handler). These
+    // only mutate the picker DOM — never a re-render, which would lose typed text.
+    document.addEventListener('click', (e) => {
+      const picker = e.target.closest('.tag-picker');
+      if (!picker) return;
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      switch (btn.dataset.action) {
+        case 'toggle-tag': {
+          if (!btn.classList.contains('on') && $$('.tag-chip.on', picker).length >= MAX_TAGS_PER_TASK) {
+            toast('Up to ' + MAX_TAGS_PER_TASK + ' tags per task');
+            return;
+          }
+          btn.classList.toggle('on');
+          btn.setAttribute('aria-pressed', btn.classList.contains('on') ? 'true' : 'false');
+          break;
+        }
+        case 'new-tag': openTagCreate(picker, btn); break;
+        case 'cancel-create-tag': closeTagCreate(picker); break;
+        case 'create-tag': submitTagCreate(picker); break;
+        case 'pick-color':
+          $$('.swatch', picker).forEach((s) => s.classList.toggle('on', s === btn));
+          break;
+      }
+    });
+    // Enter creates the tag; Esc cancels just the create row. Registered before
+    // the global shortcut handler so stopImmediatePropagation can shield it.
+    document.addEventListener('keydown', (e) => {
+      if (!e.target.matches || !e.target.matches('.tag-name')) return;
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitTagCreate(e.target.closest('.tag-picker'));
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        closeTagCreate(e.target.closest('.tag-picker'));
       }
     });
 
@@ -1711,14 +1961,22 @@
       const fd = new FormData(form);
       updateTask(li.dataset.id, {
         title: fd.get('title'),
-        note: fd.get('note'),
+        body: fd.get('body'),
+        tagIds: pickerSelectedIds($('.tag-picker', form)),
         dueToday: fd.get('dueToday') === 'on',
       });
       editingTaskId = null;
       renderTasks();
     });
     $('#taskList').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.target.matches && e.target.matches('.edit-title, .edit-note')) {
+      // Enter in the title saves; in the description it inserts a newline —
+      // Cmd/Ctrl+Enter saves from there instead.
+      if (e.key !== 'Enter' || !e.target.matches) return;
+      if (e.target.matches('.edit-title')) {
+        e.preventDefault();
+        const form = e.target.closest('form.task-edit');
+        if (form && typeof form.requestSubmit === 'function') form.requestSubmit();
+      } else if (e.target.matches('.edit-body') && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         const form = e.target.closest('form.task-edit');
         if (form && typeof form.requestSubmit === 'function') form.requestSubmit();
@@ -1828,6 +2086,7 @@
         if (!$('#modal').hidden) { closeModal(false); return; }
         if (!$('#recurModal').hidden) { closeRecurModal(); return; }
         if (!$('#settingsDrawer').hidden) { closeDrawer(); return; }
+        if (!$('#composerPanel').hidden) { setComposerOpen(false); return; }
         if (editingTaskId) { cancelEdit(); return; }
         if (typing && target instanceof HTMLElement) target.blur();
         return;
@@ -1866,6 +2125,7 @@
     const spawnedOnLoad = reconcileRecurrences();
     applyTheme();
     bindEvents();
+    $('#composerTags').innerHTML = renderTagPicker([]);
     renderSettingsPanel();
     renderAll();
     if (spawnedOnLoad > 0) toast('🔁 ' + spawnedOnLoad + ' recurring task' + (spawnedOnLoad === 1 ? '' : 's') + ' due');
